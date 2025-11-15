@@ -1,13 +1,12 @@
 `timescale 1ns/1ps
+module tb_control_unit;
 
-module tb_control;
-
-    reg  [31:0] instr;
+    reg [31:0] instruction;
     wire RegDst, ALUSrc, MemtoReg, RegWrite, MemRead, MemWrite, Jump;
     wire [3:0] ALUCtrl;
 
-    control_unit CU (
-        .instruction(instr),
+    control_unit DUT (
+        .instruction(instruction),
         .RegDst(RegDst),
         .ALUSrc(ALUSrc),
         .MemtoReg(MemtoReg),
@@ -19,56 +18,30 @@ module tb_control;
     );
 
     initial begin
-        $dumpfile("control.vcd");
-        $dumpvars(0, tb_control);
+        $dumpfile("ctrl.vcd");
+        $dumpvars(0, tb_control_unit);
 
-        $display("=========== CONTROL UNIT TEST ===========");
+        // Test R-type ADD
+        instruction = 32'b000000_01000_01001_01010_00000_100000; #5;
+        $display("ADD: RegDst=%b, ALUSrc=%b, RegWrite=%b, ALUCtrl=%b", RegDst, ALUSrc, RegWrite, ALUCtrl);
 
-        // -------------------------------
-        // R-TYPE: ADD  (opcode=000000, funct=100000)
-        // instruction: add $t1,$t2,$t3
-        // -------------------------------
-        instr = 32'b000000_01010_01011_01001_00000_100000;
-        #5;
-        $display("ADD: RegDst=%b ALUSrc=%b RegWrite=%b ALUCtrl=%b",
-                  RegDst, ALUSrc, RegWrite, ALUCtrl);
+        // Test ADDI
+        instruction = 32'b001000_00000_01000_0000000000000111; #5;
+        $display("ADDI: RegDst=%b, ALUSrc=%b, RegWrite=%b, ALUCtrl=%b", RegDst, ALUSrc, RegWrite, ALUCtrl);
 
-        // -------------------------------
-        // I-TYPE: ADDI (opcode=001000)
-        // addi $t0,$t0,5
-        // -------------------------------
-        instr = 32'b001000_01000_01000_0000000000000101;
-        #5;
-        $display("ADDI: RegDst=%b ALUSrc=%b RegWrite=%b ALUCtrl=%b",
-                  RegDst, ALUSrc, RegWrite, ALUCtrl);
+        // Test LW
+        instruction = 32'b100011_00000_01100_0000000000000000; #5;
+        $display("LW: ALUSrc=%b, MemRead=%b, MemtoReg=%b, RegWrite=%b", ALUSrc, MemRead, MemtoReg, RegWrite);
 
-        // -------------------------------
-        // LOAD WORD: LW (opcode=100011)
-        // lw $t0, 4($t1)
-        // -------------------------------
-        instr = 32'b100011_01001_01000_0000000000000100;
-        #5;
-        $display("LW: MemRead=%b MemtoReg=%b RegWrite=%b ALUSrc=%b",
-                  MemRead, MemtoReg, RegWrite, ALUSrc);
+        // Test SW
+        instruction = 32'b101011_00000_01010_0000000000000000; #5;
+        $display("SW: ALUSrc=%b, MemWrite=%b, RegWrite=%b, ALUCtrl=%b", ALUSrc, MemWrite, RegWrite, ALUCtrl);
 
-        // -------------------------------
-        // STORE WORD: SW (opcode=101011)
-        // sw $t0, 4($t1)
-        // -------------------------------
-        instr = 32'b101011_01001_01000_0000000000000100;
-        #5;
-        $display("SW: MemWrite=%b MemRead=%b ALUSrc=%b",
-                  MemWrite, MemRead, ALUSrc);
-
-        // -------------------------------
-        // JUMP: J (opcode=000010)
-        // j 0x000004
-        // -------------------------------
-        instr = 32'b000010_00000000000000000000000100;
-        #5;
+        // Test J
+        instruction = 32'b000010_00000000000000000000001100; #5;
         $display("JUMP: Jump=%b", Jump);
 
-        $display("=========== TEST COMPLETE ===========");
+        $display("Control unit test complete");
         $finish;
     end
 
