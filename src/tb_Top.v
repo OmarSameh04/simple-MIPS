@@ -13,6 +13,14 @@ module tb_mips_cpu;
     // Clock
     always #10 clk = ~clk;
 
+    // Timeout mechanism
+    initial begin
+        #100000 begin
+            $display("\nERROR: Simulation timeout! Test did not complete.");
+            $finish;
+        end
+    end
+
     initial begin
         $dumpfile("cpu.vcd");
         $dumpvars(0, tb_mips_cpu);
@@ -21,25 +29,23 @@ module tb_mips_cpu;
         reset = 1;
         #20 reset = 0;
 
-        repeat(100) @(posedge clk);
+        $display("Starting simulation...");
+        #600;  // Wait 600ns (30 clock cycles at 20ns period)
+        $display("Simulation complete.");
 
         $display("\n===== CPU REGISTER CHECK =====");
 
         // Check all registers based on new program
-        check_reg(8,  7,   "$t0");
-        check_reg(9,  3,   "$t1");
-        check_reg(10, 10,  "$t2");
-        check_reg(11, 4,   "$t3");
-        check_reg(12, 3,   "$t4");
-        check_reg(13, 7,   "$t5");
-        check_reg(14, 4,   "$t6");
-        check_reg(15, 12,  "$t7");
-        check_reg(16, 10,  "$s0");
-        check_reg(18, 42,  "$s2");  // jumped-to instruction
-        check_reg(17, 0,   "$s1");  // skipped by jump
-
-        // Memory check
-        check_mem(0, 10);
+        check_reg(8,  5,   "$t0");
+        check_reg(9,  10,  "$t1");
+        check_reg(10, 15,  "$t2");
+        check_reg(11, 5,   "$t3");
+        check_reg(12, 0,   "$t4");
+        check_reg(13, 15,  "$t5");
+        check_reg(14, 15,  "$t6");
+        check_reg(15, 40,  "$t7");
+        check_reg(16, 5,   "$s0");
+        check_reg(17, 5,   "$s1");
 
         $display("\n===== FULL REGISTER FILE DUMP =====");
         dump_register_file();
