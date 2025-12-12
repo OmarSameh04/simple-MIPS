@@ -1,0 +1,117 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0\fnil\fcharset0 Calibri;}{\f1\fnil\fcharset0 Courier New;}}
+\viewkind4\uc1\pard\sa200\sl276\slmult1\b MIPS32 Pipelined Processor: Detailed Explanation\b0\par
+\par
+\b Overview\b0\par
+This document explains how the 5-stage pipelined MIPS32 processor is implemented in the repository file `src\\mips_pipeline.v`. It covers the pipeline stages, control and data flow through pipeline registers, forwarding and hazard detection, jump handling, testbench notes used for verification, recent fixes applied during debugging, and recommended improvements.\par
+\par
+\b Design Summary\b0\par
+- Architecture: Classic 5-stage MIPS pipeline (IF, ID, EX, MEM, WB).\par
+- Key modules: `ProgramCounter.v`, `InstructionMemory.v`, `RegisterFile.v`, `ALU.v`, `Memory.v` (data memory), `ControlUnit.v`, `SignExtender.v`, `genericAdder.v`, and multiplexers/shifters.\par
+- Goals: Maintain correct instruction semantics while improving instruction throughput via pipelining.\par
+\par
+\b Pipeline Stages and Registers\b0\par
+The design uses explicit pipeline registers between the stages to hold the necessary state: IF/ID, ID/EX, EX/MEM, and MEM/WB. Each stage's responsibilities: \par
+\b IF (Instruction Fetch)\b0\par
+- Fetch instruction from `InstructionMemory` at the address held in the `ProgramCounter`.\par
+- Compute `pc + 4` for the next sequential instruction using `genericAdder`.\par
+- Output to IF/ID register: fetched instruction and `pc_plus4`.\par
+\par
+\b ID (Instruction Decode / Register Read)\b0\par
+- Decode the instruction opcode and control signals via `ControlUnit`.\par
+- Read source registers from `RegisterFile` (combinational reads).\par
+- Compute branch/jump targets (jumps are resolved in ID in this design).\par
+- Sign-extend immediates with `SignExtender`.\par
+- Place control signals, read register values, immediates, and target info into ID/EX for EX stage.\par
+\par
+\b EX (Execute)\b0\par
+- Perform ALU operations, using forwarded operands when necessary.\par
+- For R-type: ALU uses `rs` and `rt` values read in the ID stage.\par
+- For I-type: ALU uses `rs` and the sign-extended immediate.\par
+- Compute memory addresses for loads/stores.\par
+- Determine destination register numbers (e.g., `rd` vs `rt`) based on control signals.\par
+\par
+\b MEM (Memory Access)\b0\par
+- Access data memory (`Memory.v`) for loads and stores.\par
+- For loads: read data to pass to WB.\par
+- For stores: write data from forwarded/staged pipeline value into memory.\par
+\par
+\b WB (Write Back)\b0\par
+- Write results back into `RegisterFile` on the rising clock edge when `RegWrite` is asserted.\par
+- Select between ALU result and memory-read data via the `MemtoReg` control signal.\par
+\par
+\b Data Forwarding (Bypassing)\b0\par
+To avoid unnecessary stalls when an instruction needs a result produced by a previous instruction still in the pipeline, the design implements forwarding from later pipeline stages to the ALU inputs in EX stage. Typical forwarding paths implemented: \par
+- EX/MEM → EX (forward from the stage immediately before EX stage when that stage has just produced the required value).\par
+- MEM/WB → EX (forward from the result that will be written back).\par
+Forwarding selectors (named `forwardA` and `forwardB` in the code) select the correct source for ALU operands: \par
+- 00: Use ID/EX forwarded operand (no forwarding).\par
+- 10: Use EX/MEM ALU result (forward from one stage ahead).\par
+- 01: Use MEM/WB forwarded value (forward from two stages ahead).\par
+The implementation uses combinational `assign` statements to compute `forwardA` and `forwardB` based on `RegWrite` signals and destination register numbers in EX/MEM and MEM/WB.\par
+\par
+\b Load-Use Hazard Detection and Stalling\b0\par
+A load-use hazard occurs when an instruction needs a value being loaded from memory by the immediately preceding instruction. Because the load value is only available at the end of MEM stage, the EX stage of the dependent instruction cannot proceed with a correct operand that cycle. The design detects this condition and stalls the pipeline for one cycle by: \par
+- Detecting when the EX stage instruction is a load (`MemRead_ex` asserted) and its destination register number (`EX_rt`, which is used as the load destination) matches one of the source registers of the instruction in ID (IF/ID instruction fields).\par
+- On detection: the control logic asserts a `stall` signal that freezes the IF/ID pipeline register (preventing the next instruction from entering ID), keeps the PC from advancing, and injects a bubble into ID/EX by clearing relevant control signals so the EX stage performs a no-op for one cycle.\par
+Implementation detail: the load-use detection is implemented as a combinational `assign stall = MemRead_ex && (EX_rt != 0) && ((EX_rt == IFID_instruction[25:21]) || (EX_rt == IFID_instruction[20:16]));` which creates a single-cycle stall.\par
+\par
+\b Control Hazards: Jumps and Flushes\b0\par
+- Jumps are resolved in the ID stage. When a jump is taken, the new PC (`jump_target_id`) is calculated and the PC is updated to that target. \par
+- Important: when PC changes in ID, the instruction currently in IF/ID must not be executed (it was fetched from the old PC). To avoid executing it, the IF/ID register must be flushed. The recommended flush logic sets `flush_ifid = Jump_id` and clears the IF/ID contents accordingly.\par
+Note: During debugging and iteration, a missing IF/ID flush on Jump was identified as a potential source of incorrect behavior. The fix is to ensure that when a Jump is signaled in ID, `flush_ifid` is asserted for one cycle to invalidate the fetched instruction.\par
+\par
+\b Register File and Writeback Timing\b0\par
+- The `RegisterFile` in this design uses synchronous writes (performed on the rising clock edge) and combinational reads. The write port is driven by the MEM/WB pipeline outputs so the result becomes visible to subsequent instructions via forwarding or via a normal register read when appropriate.\par
+- Care must be taken with hazard and forwarding logic because the register file's write occurs at edge; forwarding handles the case when the consumer is in EX and the producer hasn't yet updated the register file.\par
+\par
+\b Data Memory\b0\par
+The `Memory.v` in this project models data memory. In the repository it is implemented with an asynchronous read (immediate read output based on address) and write enable to store data. This is simulation-friendly, but if moving to synthesis, synchronous reads/writes should be considered depending on target technology.\par
+\par
+\b Testbench and Verification Strategy\b0\par
+- A small program of 10 instructions is placed in `InstructionMemory.v` used by both the single-cycle and pipelined CPU for comparison.\par
+- Several testbench variants were created: `tb_sc_only.v` to run the single-cycle CPU (`Top.v`) and `tb_pipe_only.v` for the pipelined CPU `mips_pipeline.v`. A comparison harness (`tb_comparison.v`) was also created to compare register files after program completion.\par
+- To make debugging more robust in EDA Playground / automated runs, TB instrumentation was added: startup prints, per-cycle progress messages, and a watchdog timeout to avoid indefinite hanging. This ensures simulation output is produced even if something goes wrong.\par
+\par
+\b Recent Fixes Applied During Debugging\b0\par
+While running the pipelined TB under Icarus Verilog, the following issues were discovered and fixed: \par
+- Combinational signals (such as `stall`, `forwardA`, `forwardB`, and `flush_ifid`) were previously declared as `reg` and driven in `always @(*)` blocks in some versions of the file. These were converted to `wire` with `assign` statements for clarity and to avoid subtle simulation scheduling issues. The final implementation uses `assign` for pure combinational logic.\par
+- Forwarding selectors `forwardA` and `forwardB` were corrected to be `wire` and assigned based on EX/MEM and MEM/WB `RegWrite` and destination register numbers.\par
+- The pipeline file `mips_pipeline.v` was replaced with a corrected version (committed during the debugging session) that fixed these combinational/reg mismatches.\par
+- The testbench `tb_pipeline.v` had a Verilog ordering error (an `integer` declared after procedural code). The TB was updated to declare variables before procedural blocks and to generate a stable clock (`initial clk=0; forever #10 clk = ~clk;`) and a watchdog to terminate long runs.\par
+\par
+\b Observed Run Results\b0\par
+- The single-cycle CPU (`Top.v`) run completed successfully in Icarus Verilog and produced expected register values for the test program (registers R8..R17 were validated).\par
+- The pipelined CPU, after fixes, required further stabilization in the run environment. Some runs previously hung or produced empty outputs due to simulation-time issues; after the combinational fixes, repeatability improved. The recommended next step is to run the pipelined testbench locally with `iverilog` + `vvp`, capture a VCD (`cpu_pipeline.vcd`) and compare register file contents against the single-cycle run.\par
+\par
+\b Recommended Next Steps and Improvements\b0\par
+- Ensure Jump flush: assert `flush_ifid = Jump_id` in the ID stage to flush the fetched instruction when PC changes due to a jump.\par
+- Consider making data memory synchronous if targeting synthesis tools that expect synchronous memory semantics.\par
+- Add store-data forwarding if you later introduce cases where a store must use a forwarded value produced by an immediately preceding instruction in EX/MEM.\par
+- Expand the test program to include more branch/jump and memory dependency cases to validate corner cases of forwarding and hazards.\par
+- Use GTKWave to inspect `cpu_pipeline.vcd` waveforms and validate that pipeline registers update as expected cycle-by-cycle (PC progression, stalls, forwarded mux decisions).\par
+\par
+\b Key Code Pointers (where to look in the repo)\b0\par
+- `src/mips_pipeline.v` - pipelined CPU implementation (IF/ID, ID/EX, EX/MEM, MEM/WB registers, forwarding, hazard detection).\par
+- `src/Top.v` - single-cycle CPU reference for comparison.\par
+- `src/InstructionMemory.v` - the 10-instruction test program used in verification.\par
+- `src/RegisterFile.v`, `src/ALU.v`, `src/ControlUnit.v`, `src/SignExtender.v` - datapath and control logic used by both CPU variants.\par
+- Testbenches: `tb_sc_only.v`, `tb_pipe_only.v`, `tb_comparison.v`, `tb_pipeline_debug.v` in the `src` folder.\par
+\par
+\b How to Run a Local Verification (quick commands)\b0\par
+Open a PowerShell prompt in the repository root and run (example commands):\par
+\f1 iverilog -g2012 -o tb_sc.vvp Top.v ProgramCounter.v InstructionMemory.v RegisterFile.v ALU.v Memory.v ControlUnit.v SignExtender.v genericAdder.v 2by1MUX.v tb_sc_only.v\par
+vvp tb_sc.vvp\par
+\f0 This runs the single-cycle testbench. For the pipelined CPU, replace `Top.v` with `mips_pipeline.v` and `tb_sc_only.v` with `tb_pipe_only.v`. Capture a VCD by ensuring the TB creates `cpu_pipeline.vcd` and open it with GTKWave.\par
+\par
+\b File Created\b0\par
+A Word-compatible RTF file containing this explanation has been written to the repository root as: `MIPS_pipeline_explanation.rtf`. Microsoft Word can open this file directly.\par
+\par
+\b Contact / Next Actions\b0\par
+- If you want, I can:\par
+  - Run the pipelined TB locally in this environment to produce the final `pipe_results.txt` and `cpu_pipeline.vcd` (I can run `iverilog`/`vvp` here).\par
+  - Apply the `flush_ifid = Jump_id` change in `src/mips_pipeline.v` and re-run tests.\par
+  - Expand the test program to stress forwarding and branch hazards further.\par
+\par
+End of document.\par
+}
