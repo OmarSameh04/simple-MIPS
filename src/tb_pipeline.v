@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 
-module tb_mips_cpu_pipeline_D;
+module tb_mips_cpu_pipeline;
 
     reg clk;
     reg reset;
@@ -15,48 +15,50 @@ module tb_mips_cpu_pipeline_D;
     initial clk = 0;
     always #5 clk = ~clk;
 
-    // Expected register values (Instruction Set D)
+    // Expected register values (Instruction Set C)
     reg [31:0] expected_regs [0:31];
     integer i;
 
     initial begin
         
         // -----------------------------
-        // Initialize all registers to 0
+        // Initialize expected registers
+        // After Instruction Set C (0..9)
         // -----------------------------
         for (i = 0; i < 32; i = i + 1)
             expected_regs[i] = 0;
-      
-      
 
-        // Instruction Set D final expected results:
-        // D0: addi $s0 = 200
-        expected_regs[16] = 200;  
+        // Instruction Set C final expected results:
+        // C0: addi $t0 = 100
+        expected_regs[8]  = 100;  
 
-        // D1: lw $s1, 0($s0) → memory[200/4 = 50], preload below
-        expected_regs[17] = 50;  
+        // C1: lw $t1, 0($t0)  → MEM[100]
+        // We will preload DMEM[25] = 20
+        expected_regs[9]  = 20;
 
-        // D2: addi $s2 = s1 + 3 = 53
-        expected_regs[18] = 53;
+        // C2: addi t2 = t1 + 5 = 25
+        expected_regs[10] = 25;
 
-        // D3: add $s3 = s2 + s1 = 53 + 50 = 103
-        expected_regs[19] = 103;
+        // C3: t3 = t2 + t1 = 25 + 20 = 45
+        expected_regs[11] = 45;
 
-        // D4: and $s4 = s3 & s2 = 103 & 53 = 37
-        expected_regs[20] = 37;
+        // C4: t4 = t3 - t2 = 45 - 25 = 20
+        expected_regs[12] = 20;
 
-        // D5: or $s5 = s4 | s1 = 37 | 50 = 55
-      expected_regs[21] = 55;
+        // C5: t5 = t4 XOR t1 = 20 ^ 20 = 0
+        expected_regs[13] = 0;
 
-        // D6: sw s5 → memory[204], no register effect
+        // C6: sw t5 → stored into MEM[104]
+        // (not a register result)
 
-        // D7: lw $t0, 4($s0) → memory[204/4 = 51], preload below
-      expected_regs[8]  = 55;  
+        // C7: t6 = t5 << 2 = 0 << 2 = 0
+        expected_regs[14] = 0;
 
-        // D8: sll $t1, $t0, 1 → 55 << 1 = 110
-      expected_regs[9]  = 110;
+        // C8: t7 = t6 + 1 = 1
+        expected_regs[15] = 1;
+        
+        // C9: jump → no register effect
 
-        // D9: jump → no register effect
 
         // --------------------------------------
         // Apply Reset
@@ -67,22 +69,20 @@ module tb_mips_cpu_pipeline_D;
 
         // --------------------------------------
         // Preload data memory for LW
-        // D1: lw $s1, 0($s0) → address 200 → word index 50
-        // D7: lw $t0, 4($s0) → address 204 → word index 51
+        // LW at C1 uses address 100 → word index 25
         // --------------------------------------
-        CPU.DMEM.memory[50] = 50;
-        CPU.DMEM.memory[51] = 53;
+        CPU.DMEM.memory[25] = 20;
 
         // --------------------------------------
         // Run long enough for pipeline to finish
-        // 10 instructions + 4 pipeline flush cycles
+        // (10 instructions + 4 pipeline flush cycles)
         // --------------------------------------
         repeat (25) @(posedge clk);
 
         // --------------------------------------
         // Print results
         // --------------------------------------
-        $display("Final Register Values (After Instruction Set D):");
+        $display("Final Register Values (After Instruction Set C):");
         
         for (i = 0; i < 32; i = i + 1) begin
             $display("R%0d = %0d   %s",
