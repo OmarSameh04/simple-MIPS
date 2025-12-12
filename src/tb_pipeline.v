@@ -1,72 +1,98 @@
 `timescale 1ns/1ps
 
-module tb_mips_cpu_pipeline;
+module tb_mips_cpu_pipeline_D;
 
     reg clk;
     reg reset;
 
-    mips_cpu_pipeline DUT (
+    // Instantiate CPU
+    mips_cpu_pipeline CPU (
         .clk(clk),
         .reset(reset)
     );
 
     // Clock generation
-    always #10 clk = ~clk;
+    initial clk = 0;
+    always #5 clk = ~clk;
+
+    // Expected register values (Instruction Set D)
+    reg [31:0] expected_regs [0:31];
+    integer i;
 
     initial begin
-        $dumpfile("cpu_pipeline.vcd");
-        $dumpvars(0, tb_mips_cpu_pipeline);
+        
+        // -----------------------------
+        // Initialize all registers to 0
+        // -----------------------------
+        for (i = 0; i < 32; i = i + 1)
+            expected_regs[i] = 0;
+      
+      
 
-        // Initialize signals
-        clk = 0;
+        // Instruction Set D final expected results:
+        // D0: addi $s0 = 200
+        expected_regs[16] = 200;  
+
+        // D1: lw $s1, 0($s0) → memory[200/4 = 50], preload below
+        expected_regs[17] = 50;  
+
+        // D2: addi $s2 = s1 + 3 = 53
+        expected_regs[18] = 53;
+
+        // D3: add $s3 = s2 + s1 = 53 + 50 = 103
+        expected_regs[19] = 103;
+
+        // D4: and $s4 = s3 & s2 = 103 & 53 = 37
+        expected_regs[20] = 37;
+
+        // D5: or $s5 = s4 | s1 = 37 | 50 = 55
+      expected_regs[21] = 55;
+
+        // D6: sw s5 → memory[204], no register effect
+
+        // D7: lw $t0, 4($s0) → memory[204/4 = 51], preload below
+      expected_regs[8]  = 55;  
+
+        // D8: sll $t1, $t0, 1 → 55 << 1 = 110
+      expected_regs[9]  = 110;
+
+        // D9: jump → no register effect
+
+        // --------------------------------------
+        // Apply Reset
+        // --------------------------------------
         reset = 1;
-        #20 reset = 0;
+        #20;
+        reset = 0;
 
-        // Run simulation for a fixed number of cycles
-        repeat(100) @(posedge clk);
+        // --------------------------------------
+        // Preload data memory for LW
+        // D1: lw $s1, 0($s0) → address 200 → word index 50
+        // D7: lw $t0, 4($s0) → address 204 → word index 51
+        // --------------------------------------
+        CPU.DMEM.memory[50] = 50;
+        CPU.DMEM.memory[51] = 53;
 
-        $display("\n===== PIPELINE CPU REGISTER CHECK =====");
+        // --------------------------------------
+        // Run long enough for pipeline to finish
+        // 10 instructions + 4 pipeline flush cycles
+        // --------------------------------------
+        repeat (25) @(posedge clk);
 
-        // Check registers based on the program in InstructionMemory
-        check_reg(8,  5,   "$t0");
-        check_reg(9,  10,  "$t1");
-        check_reg(10, 15,  "$t2");
-        check_reg(11, 5,   "$t3");
-        check_reg(12, 0,   "$t4");
-        check_reg(13, 15,  "$t5");
-        check_reg(14, 15,  "$t6");
-        check_reg(15, 40,  "$t7");
-        check_reg(16, 5,   "$s0");
-        check_reg(17, 5,   "$s1");
+        // --------------------------------------
+        // Print results
+        // --------------------------------------
+        $display("Final Register Values (After Instruction Set D):");
+        
+        for (i = 0; i < 32; i = i + 1) begin
+            $display("R%0d = %0d   %s",
+                     i,
+                     CPU.REGFILE.regs[i],
+                     (CPU.REGFILE.regs[i] === expected_regs[i]) ? "OK" : "ERROR");
+        end
 
-        $display("\n===== FULL REGISTER FILE DUMP =====");
-        dump_register_file();
-
-        $display("===== TEST COMPLETE =====");
-        $finish;
+        $display("Simulation finished.");
+        $stop;
     end
-
-    //===========================
-    // Dump all 32 registers
-    //===========================
-    task dump_register_file;
-        integer i;
-        begin
-            for (i = 0; i < 32; i = i + 1)
-                $display("REG[%0d] = %0d (0x%08h)", i, DUT.REGFILE.regs[i], DUT.REGFILE.regs[i]);
-        end
-    endtask
-
-    //===========================
-    // Check a single register
-    //===========================
-    task check_reg(input integer idx, input integer exp, input [31:0] name);
-        begin
-            if (DUT.REGFILE.regs[idx] !== exp)
-                $display("FAIL: %s = %0d (expected %0d)", name, DUT.REGFILE.regs[idx], exp);
-            else
-                $display("PASS: %s = %0d", name, exp);
-        end
-    endtask
 
 endmodule
